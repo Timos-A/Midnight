@@ -300,7 +300,7 @@ impl SynthControls {
 
     fn envelope_ui(&mut self, ui: &mut Ui) {
         ui.label("Delay, attack, hold, decay, sustain and release envelope");
-        crate::ui::envelope_chart::show(ui, self.settings);
+        crate::ui::charts::envelope_chart::show(ui, self.settings);
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             knob::show(
