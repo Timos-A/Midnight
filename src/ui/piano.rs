@@ -39,10 +39,22 @@ pub struct Piano {
 }
 
 impl Piano {
+    pub fn release_all(&mut self) {
+        self.keyboard_notes = [false; NOTE_COUNT];
+    }
+
     /// Draws the piano and returns the notes currently held by mouse or keyboard.
-    pub fn ui(&mut self, ui: &mut egui::Ui, octave_shift: i8, note_selector_focused: bool) -> [bool; NOTE_COUNT] {
-        if note_selector_focused { self.keyboard_notes = [false; NOTE_COUNT]; }
-        else { self.update_keyboard_state(ui); }
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        octave_shift: i8,
+        note_selector_focused: bool,
+    ) -> [bool; NOTE_COUNT] {
+        if note_selector_focused {
+            self.keyboard_notes = [false; NOTE_COUNT];
+        } else {
+            self.update_keyboard_state(ui);
+        }
 
         if self.keyboard_notes.iter().any(|&pressed| pressed) {
             ui.ctx().request_repaint();

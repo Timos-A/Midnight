@@ -1,6 +1,6 @@
 use eframe::egui::{self, Context, Id, Slider, Ui};
 
-use crate::instruments::synth::engine::{NoteParameters, MAX_OSCILLATORS, SynthSettings, Waveform};
+use crate::instruments::synth::engine::{MAX_OSCILLATORS, NoteParameters, SynthSettings, Waveform};
 use crate::ui::knob::{self, Scale as KnobScale};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -13,7 +13,6 @@ enum Tab {
 
 pub struct SynthControls {
     settings: SynthSettings,
-    open: bool,
     selected_tab: Tab,
     confirm_more_oscillators: bool,
     allow_more_oscillators: bool,
@@ -27,7 +26,6 @@ impl Default for SynthControls {
     fn default() -> Self {
         Self {
             settings: SynthSettings::default(),
-            open: false,
             selected_tab: Tab::Oscillator,
             confirm_more_oscillators: false,
             allow_more_oscillators: false,
@@ -44,97 +42,113 @@ impl SynthControls {
         self.settings
     }
 
-    pub fn note_selector_focused(&self) -> bool { self.note_selector_focused }
+    pub fn set_settings(&mut self, settings: SynthSettings) {
+        self.settings = settings;
+        self.global_parameters = Some(NoteParameters::from_settings(&settings));
+        self.last_note = settings.selected_note;
+        self.note_query.clear();
+        self.note_selector_focused = false;
+    }
+
+    pub fn note_selector_focused(&self) -> bool {
+        self.note_selector_focused
+    }
 
     pub fn ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
-        if ui.button("Synth controls").clicked() {
-            self.open = true;
+        if self.global_parameters.is_none() {
+            self.global_parameters = Some(NoteParameters::from_settings(&self.settings));
         }
-
-        if self.global_parameters.is_none() { self.global_parameters = Some(NoteParameters::from_settings(&self.settings)); }
-
-        if !self.open {
-            return;
-        }
-
-        let response = egui::Modal::new(Id::unique("synth_controls_modal")).show(&ctx, |ui| {
-            ui.set_min_width(760.0);
-            ui.set_max_width(900.0);
-            ui.heading("Synth controls");
-            ui.label("Adjust the sound while playing; changes apply immediately.");
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.settings.per_note_enabled, "Per-note parameter locks");
-                ui.add_enabled_ui(self.settings.per_note_enabled, |ui| {
-                    let response = ui.add(egui::TextEdit::singleline(&mut self.note_query)
-                        .hint_text(if self.settings.selected_note < 24 { format!("Select note: {}", note_name(self.settings.selected_note)) } else { "All notes".to_owned() }).desired_width(110.0));
-                    if ui.small_button("All notes").clicked() {
-                        self.settings.selected_note = 24;
-                        self.note_query.clear();
-                    }
-                    self.note_selector_focused = response.has_focus();
-                    if response.has_focus() {
-                        let events = ui.input(|input| input.events.clone());
-                        if let Some(note) = events.iter().find_map(key_note) {
-                            self.settings.selected_note = note;
-                            self.note_query = note_name(note);
-                        }
-                    } else { self.note_selector_focused = false; }
-                    if self.settings.per_note_enabled && !self.note_query.is_empty() {
-                        let query = self.note_query.to_lowercase();
-                        ui.horizontal_wrapped(|ui| for note in 0..24 {
-                            let label = note_name(note);
-                            if label.to_lowercase().contains(&query) && ui.small_button(&label).clicked() {
-                                self.settings.selected_note = note; self.note_query.clear();
-                            }
-                        });
-                    }
-                });
-            });
-            if self.settings.per_note_enabled && self.settings.selected_note != self.last_note {
-                if self.last_note < 24 { self.store_selected_note_at(self.last_note); }
-                if self.settings.selected_note < 24 { self.load_selected_note(); }
-                else { self.load_global_parameters(); }
-                self.last_note = self.settings.selected_note;
-            }
-            ui.add_space(8.0);
-
-            ui.horizontal(|ui| {
-                tab_button(ui, &mut self.selected_tab, Tab::Oscillator, "Oscillator");
-                tab_button(ui, &mut self.selected_tab, Tab::Envelope, "Envelope");
-                tab_button(ui, &mut self.selected_tab, Tab::Filter, "Filter");
-                tab_button(ui, &mut self.selected_tab, Tab::Output, "Output");
-            });
-            ui.separator();
-            ui.add_space(4.0);
-
-            egui::ScrollArea::vertical()
-                .max_height(460.0)
-                .show(ui, |ui| match self.selected_tab {
-                    Tab::Oscillator => self.oscillator_ui(ui),
-                    Tab::Envelope => self.envelope_ui(ui),
-                    Tab::Filter => self.filter_ui(ui),
-                    Tab::Output => self.output_ui(ui),
-                });
-
-            if self.settings.per_note_enabled && self.settings.selected_note < 24 { self.store_selected_note(); }
-            if self.settings.selected_note >= 24 { self.global_parameters = Some(NoteParameters::from_settings(&self.settings)); }
-
-            ui.add_space(12.0);
-            ui.horizontal(|ui| {
-                if ui.button("Reset defaults").clicked() {
-                    self.settings = SynthSettings::default();
-                    self.allow_more_oscillators = false;
-                    self.confirm_more_oscillators = false;
+        ui.heading("Synth controls");
+        ui.label("Adjust the sound while playing; changes apply immediately.");
+        ui.horizontal(|ui| {
+            ui.checkbox(
+                &mut self.settings.per_note_enabled,
+                "Per-note parameter locks",
+            );
+            ui.add_enabled_ui(self.settings.per_note_enabled, |ui| {
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut self.note_query)
+                        .hint_text(if self.settings.selected_note < 24 {
+                            format!("Select note: {}", note_name(self.settings.selected_note))
+                        } else {
+                            "All notes".to_owned()
+                        })
+                        .desired_width(110.0),
+                );
+                if ui.small_button("All notes").clicked() {
+                    self.settings.selected_note = 24;
+                    self.note_query.clear();
                 }
-                if ui.button("Close").clicked() {
-                    self.open = false;
+                self.note_selector_focused = response.has_focus();
+                if response.has_focus() {
+                    let events = ui.input(|input| input.events.clone());
+                    if let Some(note) = events.iter().find_map(key_note) {
+                        self.settings.selected_note = note;
+                        self.note_query = note_name(note);
+                    }
+                } else {
+                    self.note_selector_focused = false;
+                }
+                if self.settings.per_note_enabled && !self.note_query.is_empty() {
+                    let query = self.note_query.to_lowercase();
+                    ui.horizontal_wrapped(|ui| {
+                        for note in 0..24 {
+                            let label = note_name(note);
+                            if label.to_lowercase().contains(&query)
+                                && ui.small_button(&label).clicked()
+                            {
+                                self.settings.selected_note = note;
+                                self.note_query.clear();
+                            }
+                        }
+                    });
                 }
             });
         });
+        if self.settings.per_note_enabled && self.settings.selected_note != self.last_note {
+            if self.last_note < 24 {
+                self.store_selected_note_at(self.last_note);
+            }
+            if self.settings.selected_note < 24 {
+                self.load_selected_note();
+            } else {
+                self.load_global_parameters();
+            }
+            self.last_note = self.settings.selected_note;
+        }
+        ui.add_space(8.0);
 
-        if response.backdrop_response.clicked() {
-            self.open = false;
+        ui.horizontal(|ui| {
+            tab_button(ui, &mut self.selected_tab, Tab::Oscillator, "Oscillator");
+            tab_button(ui, &mut self.selected_tab, Tab::Envelope, "Envelope");
+            tab_button(ui, &mut self.selected_tab, Tab::Filter, "Filter");
+            tab_button(ui, &mut self.selected_tab, Tab::Output, "Output");
+        });
+        ui.separator();
+        ui.add_space(4.0);
+
+        egui::ScrollArea::vertical()
+            .max_height(320.0)
+            .show(ui, |ui| match self.selected_tab {
+                Tab::Oscillator => self.oscillator_ui(ui),
+                Tab::Envelope => self.envelope_ui(ui),
+                Tab::Filter => self.filter_ui(ui),
+                Tab::Output => self.output_ui(ui),
+            });
+
+        if self.settings.per_note_enabled && self.settings.selected_note < 24 {
+            self.store_selected_note();
+        }
+        if self.settings.selected_note >= 24 {
+            self.global_parameters = Some(NoteParameters::from_settings(&self.settings));
+        }
+
+        ui.add_space(8.0);
+        if ui.button("Reset defaults").clicked() {
+            self.settings = SynthSettings::default();
+            self.allow_more_oscillators = false;
+            self.confirm_more_oscillators = false;
         }
 
         if self.confirm_more_oscillators {
@@ -149,29 +163,47 @@ impl SynthControls {
     fn store_selected_note_at(&mut self, i: usize) {
         let i = i.min(23);
         self.settings.note_settings[i] = NoteParameters {
-            oscillators: self.settings.oscillators, oscillator_count: self.settings.oscillator_count,
-            delay:self.settings.delay, attack:self.settings.attack, hold:self.settings.hold,
-            decay:self.settings.decay, sustain:self.settings.sustain, release:self.settings.release,
-            cutoff_hz:self.settings.cutoff_hz, resonance:self.settings.resonance,
+            oscillators: self.settings.oscillators,
+            oscillator_count: self.settings.oscillator_count,
+            delay: self.settings.delay,
+            attack: self.settings.attack,
+            hold: self.settings.hold,
+            decay: self.settings.decay,
+            sustain: self.settings.sustain,
+            release: self.settings.release,
+            cutoff_hz: self.settings.cutoff_hz,
+            resonance: self.settings.resonance,
         };
         self.settings.note_locked[i] = true;
     }
 
     fn load_global_parameters(&mut self) {
         if let Some(p) = self.global_parameters {
-            self.settings.oscillators=p.oscillators; self.settings.oscillator_count=p.oscillator_count;
-            self.settings.delay=p.delay; self.settings.attack=p.attack; self.settings.hold=p.hold;
-            self.settings.decay=p.decay; self.settings.sustain=p.sustain; self.settings.release=p.release;
-            self.settings.cutoff_hz=p.cutoff_hz; self.settings.resonance=p.resonance;
+            self.settings.oscillators = p.oscillators;
+            self.settings.oscillator_count = p.oscillator_count;
+            self.settings.delay = p.delay;
+            self.settings.attack = p.attack;
+            self.settings.hold = p.hold;
+            self.settings.decay = p.decay;
+            self.settings.sustain = p.sustain;
+            self.settings.release = p.release;
+            self.settings.cutoff_hz = p.cutoff_hz;
+            self.settings.resonance = p.resonance;
         }
     }
 
     fn load_selected_note(&mut self) {
         let p = self.settings.note_settings[self.settings.selected_note.min(23)];
-        self.settings.oscillators=p.oscillators; self.settings.oscillator_count=p.oscillator_count;
-        self.settings.delay=p.delay; self.settings.attack=p.attack; self.settings.hold=p.hold;
-        self.settings.decay=p.decay; self.settings.sustain=p.sustain; self.settings.release=p.release;
-        self.settings.cutoff_hz=p.cutoff_hz; self.settings.resonance=p.resonance;
+        self.settings.oscillators = p.oscillators;
+        self.settings.oscillator_count = p.oscillator_count;
+        self.settings.delay = p.delay;
+        self.settings.attack = p.attack;
+        self.settings.hold = p.hold;
+        self.settings.decay = p.decay;
+        self.settings.sustain = p.sustain;
+        self.settings.release = p.release;
+        self.settings.cutoff_hz = p.cutoff_hz;
+        self.settings.resonance = p.resonance;
     }
 
     fn oscillator_ui(&mut self, ui: &mut Ui) {
@@ -390,14 +422,52 @@ fn tab_button(ui: &mut Ui, selected: &mut Tab, tab: Tab, label: &str) {
 }
 
 fn note_name(note: usize) -> String {
-    if note >= 24 { return "All notes".to_owned(); }
-    const NAMES: [&str; 12] = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
+    if note >= 24 {
+        return "All notes".to_owned();
+    }
+    const NAMES: [&str; 12] = [
+        "C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B",
+    ];
     format!("{}{}", NAMES[note % 12], 4 + note / 12)
 }
 
 fn key_note(event: &egui::Event) -> Option<usize> {
-    let egui::Event::Key { key, physical_key, pressed: true, repeat: false, .. } = event else { return None; };
+    let egui::Event::Key {
+        key,
+        physical_key,
+        pressed: true,
+        repeat: false,
+        ..
+    } = event
+    else {
+        return None;
+    };
     let key = physical_key.unwrap_or(*key);
-    let keys = [egui::Key::Z,egui::Key::S,egui::Key::X,egui::Key::D,egui::Key::C,egui::Key::V,egui::Key::G,egui::Key::B,egui::Key::H,egui::Key::N,egui::Key::J,egui::Key::M,egui::Key::Q,egui::Key::Num2,egui::Key::W,egui::Key::Num3,egui::Key::E,egui::Key::R,egui::Key::Num5,egui::Key::T,egui::Key::Num6,egui::Key::Y,egui::Key::Num7,egui::Key::U];
+    let keys = [
+        egui::Key::Z,
+        egui::Key::S,
+        egui::Key::X,
+        egui::Key::D,
+        egui::Key::C,
+        egui::Key::V,
+        egui::Key::G,
+        egui::Key::B,
+        egui::Key::H,
+        egui::Key::N,
+        egui::Key::J,
+        egui::Key::M,
+        egui::Key::Q,
+        egui::Key::Num2,
+        egui::Key::W,
+        egui::Key::Num3,
+        egui::Key::E,
+        egui::Key::R,
+        egui::Key::Num5,
+        egui::Key::T,
+        egui::Key::Num6,
+        egui::Key::Y,
+        egui::Key::Num7,
+        egui::Key::U,
+    ];
     keys.iter().position(|candidate| *candidate == key)
 }
