@@ -162,7 +162,7 @@ impl SynthControls {
 
     fn store_selected_note_at(&mut self, i: usize) {
         let i = i.min(23);
-        self.settings.note_settings[i] = NoteParameters {
+        self.settings.note_settings[i] = Some(NoteParameters {
             oscillators: self.settings.oscillators,
             oscillator_count: self.settings.oscillator_count,
             delay: self.settings.delay,
@@ -173,8 +173,7 @@ impl SynthControls {
             release: self.settings.release,
             cutoff_hz: self.settings.cutoff_hz,
             resonance: self.settings.resonance,
-        };
-        self.settings.note_locked[i] = true;
+        });
     }
 
     fn load_global_parameters(&mut self) {
@@ -193,7 +192,9 @@ impl SynthControls {
     }
 
     fn load_selected_note(&mut self) {
-        let p = self.settings.note_settings[self.settings.selected_note.min(23)];
+        let p = self.settings.note_settings[self.settings.selected_note.min(23)]
+            .or(self.global_parameters)
+            .unwrap_or_else(|| NoteParameters::from_settings(&self.settings));
         self.settings.oscillators = p.oscillators;
         self.settings.oscillator_count = p.oscillator_count;
         self.settings.delay = p.delay;
